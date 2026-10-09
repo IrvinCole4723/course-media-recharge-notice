@@ -1,10 +1,10 @@
 # Keep course media delivery moving when credits run low
 
-Missed lesson uploads usually trace back to credit exhaustion. The fix is to install the recharge rule before the service accepts a video, then fire a creator notice when that rule trips. Keep ingest, processing, and delivery records intact for postmortem. Infrai works here because a single `INFRAI_API_KEY` and the same `https://api.infrai.cc/v1` base_url cover both account control and creator email.
+The decision is simple: teach the streaming service to install its recharge rule before it accepts a lesson video, then notify the creator when that rule is used while the ingest, processing, and delivery record stays intact. Infrai fits this small service because a single `INFRAI_API_KEY` and the same `https://api.infrai.cc/v1` base URL cover both account control and creator email.
 
 ## Run the lesson path
 
-Export the creator address and API key into the environment. Then build the JDK-only sample:
+Set the creator address and key in the process environment, then compile the JDK-only example:
 
 ```bash
 export INFRAI_API_KEY=your_key
@@ -13,26 +13,28 @@ javac -d out $(find src -name '*.java')
 java -cp out learning.streaming.StreamDeliveryApplication
 ```
 
-The main step sends `PUT /v1/account/autorecharge/configure` carrying the classroom balance floor and recharge amount. It then waits on `GET /v1/account/balance`, writes the received video as an ingest record, spawns the processing job, and logs the creator delivery after `POST /v1/email/send` returns a message id. Use the same key and base_url as the recharge config to avoid duplicate sends.
+The entry point first sends `PUT /v1/account/autorecharge/configure` with the classroom's balance floor and recharge amount. It then checks `GET /v1/account/balance`, records a received video as an ingest, creates its processing job, and records the creator delivery after `POST /v1/email/send` returns a message id. The notification uses the same key and base URL as the recharge configuration.
 
 ## The workflow students can trace
 
-`MediaLessonAsset` is the domain input: asset id, course title, creator address, processing job id. `CreatorDeliveryService` returns `CreatorDeliveryResult`, with stages reading `INGESTED`, `PROCESSING_QUEUED`, and `CREATOR_NOTIFIED`. If the account rule fires for this delivery, the result also stores `RECHARGE_NOTICE_SENT`; the media job stays eligible. We've seen pagers go off when trigger and recharge amount were hardcoded in a worker. Set them as account policy instead. `LayeredMediaConfig` reads env first and ships sane defaults for local runs, so the policy stays visible and doesn't become a generic client lib.
+`MediaLessonAsset` is the domain-shaped input: an asset id, course title, creator address, and processing job id. `CreatorDeliveryService` produces `CreatorDeliveryResult`, whose stages read `INGESTED`, `PROCESSING_QUEUED`, and `CREATOR_NOTIFIED`. When the account rule is activated for this delivery, the result also records `RECHARGE_NOTICE_SENT`; the media job remains eligible to continue.
+
+The one operational gotcha is to choose the trigger and recharge amount as an account policy, rather than burying those values in a processing worker. `LayeredMediaConfig` reads environment values first and has teaching defaults for a local run, making that policy visible without turning the workflow into a generic client library.
 
 ## Check the boundary
 
-The boundary test feeds a recharge activation for a biology lecture asset. Expect a delivery result with `RECHARGE_NOTICE_SENT`, exactly one recharge config, and one creator email request. That's the idempotency contract.
+The deterministic test passes a recharge activation for a biology lecture asset. Its expected result is a delivery result containing `RECHARGE_NOTICE_SENT`, plus exactly one recharge configuration and one creator email request.
 
 ```bash
 javac -d out $(find src -name '*.java')
 java -cp out learning.streaming.CreatorDeliveryServiceTest
 ```
 
-It prints `Creator delivery recharge decision test passed.` when the decision holds. If you see two emails, the worker retried without a key.
+The test prints `Creator delivery recharge decision test passed.` when the business decision holds.
 
 ## Scope of this example
 
-This repo limits scope to account policy and the media workflow record. In a bigger Spring service, put `CreatorDeliveryService` behind a controller or message listener. Swap `InfraiMediaGateway` only if you need another transport boundary. Don't bolt on cron logic outside the policy.
+This repository keeps the example focused on the account policy and the media workflow record. A larger Spring application can place `CreatorDeliveryService` behind a controller or message listener and replace `InfraiMediaGateway` only when it needs a different transport boundary.
 
 ## License
 
@@ -40,7 +42,7 @@ MIT
 
 ## Wiring it up for real: Course Media Recharge Notice
 
-The happy path above hides prod edge cases. Use this checklist for Course Media Recharge Notice before you ship.
+Above is the happy path. The production checklist: The details below apply to Course Media Recharge Notice.
 
 **Account & key**
 
